@@ -18,6 +18,8 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
+using System.IO;
+using Microsoft.Win32;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -86,6 +88,43 @@ namespace WindowPin
         }
     }
 
+    internal static class AutoStart
+    {
+        private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
+        private const string ValueName = "WindowTopmost";
+
+        internal static bool IsEnabled()
+        {
+            try
+            {
+                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(RunKeyPath, false))
+                    return key != null && key.GetValue(ValueName) != null;
+            }
+            catch { return false; }
+        }
+
+        internal static void Enable(string launcherPath)
+        {
+            if (string.IsNullOrEmpty(launcherPath) || !File.Exists(launcherPath))
+                throw new FileNotFoundException("找不到启动器，无法设置开机自启动：" + launcherPath);
+            string command = "\"" + Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "wscript.exe")
+                + "\" \"" + launcherPath + "\"";
+            using (RegistryKey key = Registry.CurrentUser.CreateSubKey(RunKeyPath))
+            {
+                if (key == null) throw new InvalidOperationException("无法打开当前用户的启动项。");
+                key.SetValue(ValueName, command, RegistryValueKind.String);
+            }
+        }
+
+        internal static void Disable()
+        {
+            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(RunKeyPath, true))
+            {
+                if (key != null) key.DeleteValue(ValueName, false);
+            }
+        }
+    }
+
     internal sealed class MessageWindow : NativeWindow, IDisposable
     {
         internal Action Toggle;
@@ -132,6 +171,7 @@ namespace WindowPin
         private readonly IntPtr ownerToken = new IntPtr(Process.GetCurrentProcess().Id);
         private readonly NotifyIcon tray;
         private readonly ContextMenuStrip menu;
+        private readonly ToolStripMenuItem autoStartItem;
         private readonly MessageWindow host;
 
         internal PinContext()
@@ -140,8 +180,13 @@ namespace WindowPin
             menu = new ContextMenuStrip();
             menu.Items.Add(new ToolStripMenuItem("选中窗口后按 Ctrl + Alt + T") { Enabled = false });
             menu.Items.Add(new ToolStripSeparator());
+            autoStartItem = new ToolStripMenuItem("开机自启动") { Checked = AutoStart.IsEnabled() };
+            autoStartItem.Click += delegate { ToggleAutoStart(); };
+            menu.Items.Add(autoStartItem);
+            menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("取消本工具开启的全部置顶", null, delegate { RestoreAll(); });
             menu.Items.Add("退出并取消本工具开启的置顶", null, delegate { StopAndRestore(); });
+            menu.Opening += delegate { autoStartItem.Checked = AutoStart.IsEnabled(); };
             tray = new NotifyIcon {
                 Icon = SystemIcons.Application,
                 Text = "窗口置顶 | Ctrl + Alt + T",
@@ -163,6 +208,23 @@ namespace WindowPin
         private void ShowHelp()
         {
             Notify("窗口置顶已启动", "点击目标窗口，按 Ctrl+Alt+T 置顶；再按一次取消。右键托盘图标可取消全部或退出。", false);
+        }
+
+        private void ToggleAutoStart()
+        {
+            bool enable = !autoStartItem.Checked;
+            try
+            {
+                if (enable) AutoStart.Enable(Tool.LauncherPath);
+                else AutoStart.Disable();
+                autoStartItem.Checked = enable;
+                Notify(enable ? "已开启开机自启动" : "已关闭开机自启动",
+                    enable ? "登录 Windows 后会自动在托盘运行本工具。" : "下次登录 Windows 时将不再自动运行本工具。", false);
+            }
+            catch (Exception error)
+            {
+                Notify("操作失败", "无法修改开机自启动：" + error.GetBaseException().Message, true);
+            }
         }
 
         private void ToggleForeground()
@@ -246,6 +308,8 @@ namespace WindowPin
 
     public static class Tool
     {
+        public static string LauncherPath { get; set; }
+
         public static long HostHandle()
         {
             return Api.FindWindow(null, Api.HostTitle).ToInt64();
@@ -299,7 +363,10 @@ namespace WindowPin
             }
         }
         'Stop' { [WindowPin.Tool]::Stop() }
-        'Start' { [WindowPin.Tool]::Run() }
+        'Start' {
+            [WindowPin.Tool]::LauncherPath = Join-Path $PSScriptRoot '启动通用置顶.vbs'
+            [WindowPin.Tool]::Run()
+        }
     }
 }
 catch {
