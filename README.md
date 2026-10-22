@@ -6,6 +6,7 @@
 
 - **一键置顶**：`Ctrl + Alt + T` 切换当前前台窗口的置顶状态。
 - **多窗口独立管理**：不同窗口可以分别置顶或取消。
+- **置顶窗口列表**：托盘右键查看本工具置顶的窗口，点击标题即可切换回该窗口。
 - **托盘运行**：由 VBS 启动，无命令行窗口。
 - **干净退出**：正常退出时自动取消本工具开启的全部置顶。
 - **单实例**：重复启动不会产生多个常驻进程。
@@ -30,7 +31,7 @@
 
 ### 下载便携包
 
-1. 从 [Releases](https://github.com/wojiushiwangdefa-sketch/window-topmost/releases) 下载 `WindowTopmost-v1.1.0-Win11.zip`。
+1. 从 [Releases](https://github.com/wojiushiwangdefa-sketch/window-topmost/releases) 下载 `WindowTopmost-v1.2.0-Win11.zip`。
 2. 解压到任意位置。压缩包来自网络时，建议先右键 zip → 属性 → 勾选“解除锁定”，再解压。
 3. 双击 `启动通用置顶.vbs`，托盘会出现图标。
 4. 点击目标窗口，按 `Ctrl + Alt + T`。
@@ -48,6 +49,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -STA -File .\WindowTopmost.ps1
 | 操作 | 效果 |
 | --- | --- |
 | `Ctrl + Alt + T` | 置顶/取消置顶当前前台窗口 |
+| 托盘右键 → 已置顶窗口 (n) | 列出本工具置顶的窗口，点击切换到该窗口 |
 | 托盘右键 → 开机自启动 | 勾选后登录 Windows 自动运行；取消勾选即关闭 |
 | 托盘右键 → 取消本工具开启的全部置顶 | 只恢复由本工具置顶的窗口 |
 | 托盘右键 → 退出并取消本工具开启的置顶 | 恢复全部置顶后退出程序 |
@@ -71,6 +73,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\WindowTopmost.ps1 -Mode St
   powershell -NoProfile -ExecutionPolicy Bypass -STA -File .\WindowTopmost.ps1
   ```
 
+- “已置顶窗口”列表只包含由本工具置顶的窗口；窗口关闭或取消置顶后会自动从列表移除。
 - 少数使用特殊窗口管理的程序（如独占全屏游戏）可能无法置顶。
 - 如果 `Ctrl + Alt + T` 已被其它程序占用，启动时会提示快捷键注册失败。
 - 开机自启动是可选功能，默认关闭。开启后会写入当前用户的 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，命令指向当前文件夹中的 `启动通用置顶.vbs`；取消勾选即删除。如果移动了文件夹，请重新勾选一次以更新路径。
@@ -96,6 +99,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\WindowTopmost.ps1 -Mode St
 - `GetForegroundWindow` 获取当前前台窗口。
 - `SetWindowPos(HWND_TOPMOST / HWND_NOTOPMOST)` 切换置顶状态。
 - `SetProp` 给窗口打上所有者标记，退出时只恢复本工具修改过的窗口。
+- 托盘菜单在打开时动态枚举已置顶窗口；点击标题时调用 `SetForegroundWindow` 切换，失效窗口会自动清理。
 - 命名 Mutex + 隐藏消息窗口实现单实例和状态查询。
 - 可选开机自启动通过当前用户的 `Run` 注册表项实现，取消勾选时删除该值。
 - 全程只调用 Win32 API 和 Windows Forms，无网络请求。
@@ -110,7 +114,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\WindowTopmost.ps1 -Mode St
 
 ## 项目说明
 
-本项目是 WAL 的第一个 AI 练习项目，由 WAX 代为上传。
+因为账号及网络问题，WAL 的这第一个 AI 练习项目由 WAX 代为上传。
 
 ## 许可证
 
@@ -120,4 +124,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\WindowTopmost.ps1 -Mode St
 
 ## English
 
-A lightweight always-on-top utility for Windows 10/11. Extract the release zip, double-click `启动通用置顶.vbs` (the launcher), click a window, and press `Ctrl + Alt + T` to toggle its topmost state. The app lives in the system tray and makes no network requests. An optional checked “Start with Windows” item in the tray menu enables or disables auto-start for the current user; it is off by default and stored in the current user's Run registry key. Requires Windows PowerShell 5.1 and .NET Framework 4.x, both included with Windows. Licensed under MIT.
+A lightweight always-on-top utility for Windows 10/11. Extract the release zip, double-click `启动通用置顶.vbs` (the launcher), click a window, and press `Ctrl + Alt + T` to toggle its topmost state. The app lives in the system tray and makes no network requests. A “已置顶窗口” submenu lists the windows pinned by the tool; click a title to switch back to that window. An optional checked “Start with Windows” item enables or disables auto-start for the current user; it is off by default and stored in the current user's Run registry key. Requires Windows PowerShell 5.1 and .NET Framework 4.x, both included with Windows. Licensed under MIT.

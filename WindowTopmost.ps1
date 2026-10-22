@@ -35,6 +35,7 @@ namespace WindowPin
         internal const int StopMessage = 0x8001;
         internal const int HelpMessage = 0x8002;
         internal const int HotkeyId = 1;
+        internal const int SW_RESTORE = 9;
 
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -72,6 +73,18 @@ namespace WindowPin
         internal static extern bool PostMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
         [DllImport("user32.dll")]
         internal static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+        [DllImport("user32.dll")]
+        internal static extern bool SetForegroundWindow(IntPtr window);
+        [DllImport("user32.dll")]
+        internal static extern bool BringWindowToTop(IntPtr window);
+        [DllImport("user32.dll")]
+        internal static extern bool ShowWindow(IntPtr window, int command);
+        [DllImport("user32.dll")]
+        internal static extern bool IsIconic(IntPtr window);
+        [DllImport("user32.dll")]
+        internal static extern bool AttachThreadInput(uint attach, uint attachTo, bool attachInput);
+        [DllImport("kernel32.dll")]
+        internal static extern uint GetCurrentThreadId();
 
         internal static bool IsTopmost(IntPtr window)
         {
@@ -171,6 +184,7 @@ namespace WindowPin
         private readonly IntPtr ownerToken = new IntPtr(Process.GetCurrentProcess().Id);
         private readonly NotifyIcon tray;
         private readonly ContextMenuStrip menu;
+        private readonly ToolStripMenuItem pinnedMenu;
         private readonly ToolStripMenuItem autoStartItem;
         private readonly MessageWindow host;
 
@@ -178,15 +192,24 @@ namespace WindowPin
         {
             host = new MessageWindow();
             menu = new ContextMenuStrip();
+            menu.ShowItemToolTips = true;
             menu.Items.Add(new ToolStripMenuItem("选中窗口后按 Ctrl + Alt + T") { Enabled = false });
             menu.Items.Add(new ToolStripSeparator());
+            pinnedMenu = new ToolStripMenuItem("已置顶窗口 (0)") { Enabled = false };
+            pinnedMenu.ToolTipText = "点击窗口标题切换到该窗口";
+            pinnedMenu.DropDownOpening += delegate { RebuildPinnedMenu(); };
+            pinnedMenu.DropDown.ShowItemToolTips = true;
+            menu.Items.Add(pinnedMenu);
             autoStartItem = new ToolStripMenuItem("开机自启动") { Checked = AutoStart.IsEnabled() };
             autoStartItem.Click += delegate { ToggleAutoStart(); };
             menu.Items.Add(autoStartItem);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("取消本工具开启的全部置顶", null, delegate { RestoreAll(); });
             menu.Items.Add("退出并取消本工具开启的置顶", null, delegate { StopAndRestore(); });
-            menu.Opening += delegate { autoStartItem.Checked = AutoStart.IsEnabled(); };
+            menu.Opening += delegate {
+                autoStartItem.Checked = AutoStart.IsEnabled();
+                RebuildPinnedMenu();
+            };
             tray = new NotifyIcon {
                 Icon = SystemIcons.Application,
                 Text = "窗口置顶 | Ctrl + Alt + T",
@@ -207,7 +230,91 @@ namespace WindowPin
 
         private void ShowHelp()
         {
-            Notify("窗口置顶已启动", "点击目标窗口，按 Ctrl+Alt+T 置顶；再按一次取消。右键托盘图标可取消全部或退出。", false);
+            Notify("窗口置顶已启动", "点击目标窗口，按 Ctrl+Alt+T 置顶；再按一次取消。右键托盘图标可查看已置顶窗口、取消全部或退出。", false);
+        }
+
+        private void RebuildPinnedMenu()
+        {
+            var entries = new List<KeyValuePair<IntPtr, string>>();
+            foreach (IntPtr window in new List<IntPtr>(pinned))
+            {
+                if (!Api.IsWindow(window) || Api.GetProp(window, Api.OwnerProperty) != ownerToken)
+                {
+                    pinned.Remove(window);
+                    continue;
+                }
+                entries.Add(new KeyValuePair<IntPtr, string>(window, WindowTitle(window)));
+            }
+            entries.Sort(delegate(KeyValuePair<IntPtr, string> left, KeyValuePair<IntPtr, string> right) {
+                return string.Compare(left.Value, right.Value, StringComparison.CurrentCultureIgnoreCase);
+            });
+
+            pinnedMenu.DropDownItems.Clear();
+            pinnedMenu.Text = "已置顶窗口 (" + entries.Count + ")";
+            pinnedMenu.Enabled = entries.Count != 0;
+            foreach (KeyValuePair<IntPtr, string> entry in entries)
+            {
+                var item = new ToolStripMenuItem(MenuTitle(entry.Value));
+                item.ToolTipText = entry.Value.Length == 0 ? "无标题窗口" : entry.Value;
+                IntPtr target = entry.Key;
+                item.Click += delegate { FocusPinnedWindow(target); };
+                pinnedMenu.DropDownItems.Add(item);
+            }
+        }
+
+        private static string WindowTitle(IntPtr window)
+        {
+            var title = new StringBuilder(512);
+            Api.GetWindowText(window, title, title.Capacity);
+            return title.ToString();
+        }
+
+        private static string MenuTitle(string title)
+        {
+            string text = title.Replace("\r", " ").Replace("\n", " ").Replace("\t", " ").Trim();
+            if (text.Length == 0) text = "（无标题窗口）";
+            if (text.Length > 60) text = text.Substring(0, 57) + "...";
+            return text.Replace("&", "&&");
+        }
+
+        private void FocusPinnedWindow(IntPtr window)
+        {
+            try
+            {
+                if (!Api.IsWindow(window) || Api.GetProp(window, Api.OwnerProperty) != ownerToken)
+                {
+                    pinned.Remove(window);
+                    Notify("窗口不可用", "该窗口已关闭或已取消置顶。", true);
+                    return;
+                }
+                if (Api.IsIconic(window)) Api.ShowWindow(window, Api.SW_RESTORE);
+                if (!Api.SetForegroundWindow(window) && !ActivateWindow(window))
+                    Notify("切换窗口失败", "Windows 拒绝了焦点切换，请手动点击目标窗口。", true);
+            }
+            catch (Exception error)
+            {
+                Notify("切换窗口失败", error.GetBaseException().Message, true);
+            }
+        }
+
+        private static bool ActivateWindow(IntPtr window)
+        {
+            IntPtr foreground = Api.GetForegroundWindow();
+            uint processId;
+            uint foregroundThread = Api.GetWindowThreadProcessId(foreground, out processId);
+            uint currentThread = Api.GetCurrentThreadId();
+            bool attached = false;
+            try
+            {
+                if (foregroundThread != 0 && foregroundThread != currentThread)
+                    attached = Api.AttachThreadInput(currentThread, foregroundThread, true);
+                Api.BringWindowToTop(window);
+                return Api.SetForegroundWindow(window);
+            }
+            finally
+            {
+                if (attached) Api.AttachThreadInput(currentThread, foregroundThread, false);
+            }
         }
 
         private void ToggleAutoStart()
@@ -259,9 +366,8 @@ namespace WindowPin
                     pinned.Remove(window);
                 }
 
-                var title = new StringBuilder(512);
-                Api.GetWindowText(window, title, title.Capacity);
-                Notify(enable ? "已置顶" : "已取消置顶", title.Length == 0 ? "当前窗口" : title.ToString(), false);
+                string title = WindowTitle(window);
+                Notify(enable ? "已置顶" : "已取消置顶", title.Length == 0 ? "当前窗口" : title, false);
             }
             catch (Exception error) { Notify("操作失败", error.Message, true); }
         }
