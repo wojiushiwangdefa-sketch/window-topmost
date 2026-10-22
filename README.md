@@ -108,6 +108,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\WindowTopmost.ps1 -Mode St
 
 欢迎提交 Issue 或 Pull Request。
 
+## 项目说明
+
+本项目是 WAL 的第一个 AI 练习项目，由 WAX 代为上传。
+
 ## 许可证
 
 [MIT](LICENSE)
